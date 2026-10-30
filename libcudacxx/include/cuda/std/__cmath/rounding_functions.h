@@ -140,9 +140,10 @@ template <class _Integer>
 
 #if _CCCL_HAS_FLOAT128()
 // Unlike __builtin_fabsf128, older gcc (e.g. gcc-7) lacks the f128 rounding builtins, so rely on __has_builtin only
-#  if _CCCL_CHECK_BUILTIN(builtin_ceilf128)
+// clang < 19 lowers the f128 rounding builtins to the long double libcalls (e.g. ceill) on x86_64, so skip them
+#  if _CCCL_CHECK_BUILTIN(builtin_ceilf128) && !_CCCL_COMPILER(CLANG, <, 19)
 #    define _CCCL_BUILTIN_CEILF128(...) __builtin_ceilf128(__VA_ARGS__)
-#  endif // _CCCL_CHECK_BUILTIN(builtin_ceilf128)
+#  endif // _CCCL_CHECK_BUILTIN(builtin_ceilf128) && !_CCCL_COMPILER(CLANG, <, 19)
 #endif // _CCCL_HAS_FLOAT128()
 
 // nvcc doesn't implement __builtin_ceilf128 on device
@@ -239,9 +240,9 @@ template <class _Integer, enable_if_t<is_integral_v<_Integer>, int> = 0>
 #endif // _CCCL_CHECK_BUILTIN(builtin_floor)
 
 #if _CCCL_HAS_FLOAT128()
-#  if _CCCL_CHECK_BUILTIN(builtin_floorf128)
+#  if _CCCL_CHECK_BUILTIN(builtin_floorf128) && !_CCCL_COMPILER(CLANG, <, 19)
 #    define _CCCL_BUILTIN_FLOORF128(...) __builtin_floorf128(__VA_ARGS__)
-#  endif // _CCCL_CHECK_BUILTIN(builtin_floorf128)
+#  endif // _CCCL_CHECK_BUILTIN(builtin_floorf128) && !_CCCL_COMPILER(CLANG, <, 19)
 #endif // _CCCL_HAS_FLOAT128()
 
 // nvcc doesn't implement __builtin_floorf128 on device
@@ -1053,9 +1054,9 @@ template <class _Integer, enable_if_t<is_integral_v<_Integer>, int> = 0>
 #endif // _CCCL_CHECK_BUILTIN(builtin_round)
 
 #if _CCCL_HAS_FLOAT128()
-#  if _CCCL_CHECK_BUILTIN(builtin_roundf128)
+#  if _CCCL_CHECK_BUILTIN(builtin_roundf128) && !_CCCL_COMPILER(CLANG, <, 19)
 #    define _CCCL_BUILTIN_ROUNDF128(...) __builtin_roundf128(__VA_ARGS__)
-#  endif // _CCCL_CHECK_BUILTIN(builtin_roundf128)
+#  endif // _CCCL_CHECK_BUILTIN(builtin_roundf128) && !_CCCL_COMPILER(CLANG, <, 19)
 #endif // _CCCL_HAS_FLOAT128()
 
 // nvcc doesn't implement __builtin_roundf128 on device
@@ -1158,9 +1159,9 @@ template <class _Integer, enable_if_t<is_integral_v<_Integer>, int> = 0>
 #endif // _CCCL_CHECK_BUILTIN(builtin_trunc)
 
 #if _CCCL_HAS_FLOAT128()
-#  if _CCCL_CHECK_BUILTIN(builtin_truncf128)
+#  if _CCCL_CHECK_BUILTIN(builtin_truncf128) && !_CCCL_COMPILER(CLANG, <, 19)
 #    define _CCCL_BUILTIN_TRUNCF128(...) __builtin_truncf128(__VA_ARGS__)
-#  endif // _CCCL_CHECK_BUILTIN(builtin_truncf128)
+#  endif // _CCCL_CHECK_BUILTIN(builtin_truncf128) && !_CCCL_COMPILER(CLANG, <, 19)
 #endif // _CCCL_HAS_FLOAT128()
 
 // nvcc doesn't implement __builtin_truncf128 on device
