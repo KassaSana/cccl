@@ -561,6 +561,22 @@ template <class _Integer, enable_if_t<is_integral_v<_Integer>, int> = 0>
 #  undef _CCCL_BUILTIN_SCALBLNL
 #endif // _CCCL_CUDA_COMPILER(CLANG)
 
+#if _CCCL_HAS_FLOAT128()
+#  if _CCCL_CHECK_BUILTIN(builtin_scalblnf128)
+#    define _CCCL_BUILTIN_SCALBLNF128(...) __builtin_scalblnf128(__VA_ARGS__)
+#  endif // _CCCL_CHECK_BUILTIN(builtin_scalblnf128)
+
+// clang-cuda can not call into the host math library on device
+#  if _CCCL_CUDA_COMPILER(CLANG)
+#    undef _CCCL_BUILTIN_SCALBLNF128
+#  endif // _CCCL_CUDA_COMPILER(CLANG)
+
+// nvcc doesn't implement __builtin_scalblnf128 on device
+#  if _CCCL_CUDA_COMPILER(NVCC) && _CCCL_DEVICE_COMPILATION()
+#    undef _CCCL_BUILTIN_SCALBLNF128
+#  endif // _CCCL_CUDA_COMPILER(NVCC) && _CCCL_DEVICE_COMPILATION()
+#endif // _CCCL_HAS_FLOAT128()
+
 [[nodiscard]] _CCCL_HOST_DEVICE_API inline float scalbln(float __x, long __y) noexcept
 {
 #ifdef _CCCL_BUILTIN_SCALBLNF
@@ -621,6 +637,22 @@ template <class _Integer, enable_if_t<is_integral_v<_Integer>, int> = 0>
   return __float2bfloat16(::cuda::std::scalblnf(__bfloat162float(__x), __y));
 }
 #endif // _LIBCUDACXX_HAS_NVBF16()
+
+#if _CCCL_HAS_FLOAT128()
+[[nodiscard]] _CCCL_HOST_DEVICE_API inline __float128 scalbln(__float128 __x, long __y) noexcept
+{
+#  if defined(_CCCL_BUILTIN_SCALBLNF128)
+  return _CCCL_BUILTIN_SCALBLNF128(__x, __y);
+#  else // ^^^ _CCCL_BUILTIN_SCALBLNF128 ^^^ / vvv !_CCCL_BUILTIN_SCALBLNF128 vvv
+  // There is no __nv_fp128_scalbln. Any exponent beyond the range of int already overflows or underflows every finite
+  // value, so clamping it to int gives the same result
+  constexpr long __int_min = numeric_limits<int>::min();
+  constexpr long __int_max = numeric_limits<int>::max();
+  const int __e            = static_cast<int>(__y < __int_min ? __int_min : (__y > __int_max ? __int_max : __y));
+  return ::cuda::std::ldexp(__x, __e);
+#  endif // ^^^ !_CCCL_BUILTIN_SCALBLNF128 ^^^
+}
+#endif // _CCCL_HAS_FLOAT128()
 
 template <class _Integer, enable_if_t<is_integral_v<_Integer>, int> = 0>
 [[nodiscard]] _CCCL_HOST_DEVICE_API inline double scalbln(_Integer __x, long __y) noexcept

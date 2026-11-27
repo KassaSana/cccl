@@ -622,13 +622,148 @@ TEST_HOST_DEVICE_FUNC void test_float128_ldexp_fenv(float val)
 }
 #  endif // _CCCL_HOSTED()
 
-// Only ldexp supports __float128 so far, so the generic driver can not be used
+TEST_HOST_DEVICE_FUNC void test_float128_scalbln_edge_cases(float val)
+{
+  using T = __float128;
+
+  constexpr long long_min = cuda::std::numeric_limits<long>::min();
+  constexpr long long_max = cuda::std::numeric_limits<long>::max();
+  constexpr long int_min  = cuda::std::numeric_limits<int>::min();
+  constexpr long int_max  = cuda::std::numeric_limits<int>::max();
+
+  // val is only known at run time, which keeps the calls from being evaluated by the compiler
+  T one         = T(val);
+  T min         = one * cuda::std::numeric_limits<T>::min(); // 2^-16382
+  T max         = one * cuda::std::numeric_limits<T>::max(); // (2 - 2^-112) * 2^16383
+  T dmin        = one * cuda::std::numeric_limits<T>::denorm_min(); // 2^-16494
+  T eps         = one * cuda::std::numeric_limits<T>::epsilon(); // 2^-112
+  T inf         = one * cuda::std::numeric_limits<T>::infinity();
+  T nan         = one * cuda::std::numeric_limits<T>::quiet_NaN();
+  T two_pow_112 = one * T(1ull << 56) * T(1ull << 56);
+
+  // binary128 keeps mantissa bits well beyond the double precision
+  assert(eq(cuda::std::scalbln(one + eps, 112l), two_pow_112 + T(1)));
+  assert(eq(cuda::std::scalbln(two_pow_112 + T(1), -112l), one + eps));
+
+  // subnormal results, including one that is rounded
+  assert(eq(cuda::std::scalbln(dmin, 16494l), one));
+  assert(eq(cuda::std::scalbln(-min, -112l), -dmin));
+  assert(eq(cuda::std::scalbln(one + eps, -16495l), dmin));
+
+  // overflow and underflow
+  assert(eq(cuda::std::scalbln(max, 1l), inf));
+  assert(eq(cuda::std::scalbln(one, -16495l), T(0.0)));
+  assert(cuda::std::signbit(cuda::std::scalbln(-one, -16495l)));
+
+  // exponents at and beyond the range of int. __float128 is only enabled on 64-bit Linux, where long is wider than int
+  static_assert(sizeof(long) > sizeof(int));
+  assert(eq(cuda::std::scalbln(dmin, int_max), inf));
+  assert(eq(cuda::std::scalbln(max, int_min), T(0.0)));
+  assert(eq(cuda::std::scalbln(dmin, int_max + 1), inf));
+  assert(eq(cuda::std::scalbln(-dmin, int_max + 1), -inf));
+  assert(eq(cuda::std::scalbln(max, int_min - 1), T(0.0)));
+  assert(cuda::std::signbit(cuda::std::scalbln(-max, int_min - 1)));
+  assert(eq(cuda::std::scalbln(dmin, long_max), inf));
+  assert(eq(cuda::std::scalbln(-dmin, long_max), -inf));
+  assert(eq(cuda::std::scalbln(max, long_min), T(0.0)));
+  assert(!cuda::std::signbit(cuda::std::scalbln(max, long_min)));
+  assert(cuda::std::signbit(cuda::std::scalbln(-max, long_min)));
+  assert(eq(cuda::std::scalbln(dmin, long_max / 2), inf));
+  assert(eq(cuda::std::scalbln(max, long_min / 2), T(0.0)));
+
+  // zero, infinity and NaN are returned for every exponent
+  assert(eq(cuda::std::scalbln(T(0.0) * one, long_max), T(0.0)));
+  assert(!cuda::std::signbit(cuda::std::scalbln(T(0.0) * one, long_min)));
+  assert(cuda::std::signbit(cuda::std::scalbln(T(-0.0) * one, long_max)));
+  assert(cuda::std::signbit(cuda::std::scalbln(T(-0.0) * one, long_min)));
+  assert(eq(cuda::std::scalbln(inf, long_min), inf));
+  assert(eq(cuda::std::scalbln(-inf, long_max), -inf));
+  assert(cuda::std::isnan(cuda::std::scalbln(nan, long_min)));
+  assert(cuda::std::isnan(cuda::std::scalbln(nan, long_max)));
+}
+
+#  if _CCCL_HOSTED()
+// Exponents beyond the range of int must round and raise exceptions like the exact exponent would
+TEST_HOST_DEVICE_FUNC void test_float128_scalbln_fenv(float val)
+{
+  unused(val);
+  NV_IF_TARGET(NV_IS_HOST, ({
+                 using T = __float128;
+
+                 constexpr long long_min  = cuda::std::numeric_limits<long>::min();
+                 constexpr long long_max  = cuda::std::numeric_limits<long>::max();
+                 constexpr long int_min   = cuda::std::numeric_limits<int>::min();
+                 constexpr long int_max   = cuda::std::numeric_limits<int>::max();
+                 constexpr int exceptions = FE_INEXACT | FE_INVALID | FE_OVERFLOW | FE_UNDERFLOW;
+
+                 // volatile keeps the calls from being moved across the changes of the rounding mode
+                 volatile T one  = T(val);
+                 volatile T max  = cuda::std::numeric_limits<T>::max();
+                 volatile T dmin = cuda::std::numeric_limits<T>::denorm_min();
+                 volatile T inf  = cuda::std::numeric_limits<T>::infinity();
+                 volatile T res  = T(0.0);
+
+                 // exact results raise no exceptions
+                 feclearexcept(FE_ALL_EXCEPT);
+                 res = cuda::std::scalbln(T(3) * one, 4l);
+                 assert(eq(T(res), T(48)));
+                 res = cuda::std::scalbln(T(0.0) * one, long_max);
+                 assert(eq(T(res), T(0.0)));
+                 res = cuda::std::scalbln(inf, long_min);
+                 assert(eq(T(res), T(inf)));
+                 assert(!fetestexcept(exceptions));
+
+                 // overflow and underflow
+                 res = cuda::std::scalbln(one, long_max);
+                 assert(eq(T(res), T(inf)));
+                 assert(fetestexcept(exceptions) == (FE_INEXACT | FE_OVERFLOW));
+                 feclearexcept(FE_ALL_EXCEPT);
+                 res = cuda::std::scalbln(max, long_min);
+                 assert(eq(T(res), T(0.0)));
+                 assert(fetestexcept(exceptions) == (FE_INEXACT | FE_UNDERFLOW));
+                 feclearexcept(FE_ALL_EXCEPT);
+
+                 // results that overflow or underflow are rounded in the current rounding mode
+                 assert(fesetround(FE_UPWARD) == 0);
+                 res = cuda::std::scalbln(max, long_min);
+                 assert(eq(T(res), T(dmin)));
+                 res = cuda::std::scalbln(max, int_min - 1);
+                 assert(eq(T(res), T(dmin)));
+                 res = cuda::std::scalbln(-max, long_min);
+                 assert(eq(T(res), T(0.0)) && cuda::std::signbit(T(res)));
+                 res = cuda::std::scalbln(-dmin, long_max);
+                 assert(eq(T(res), -T(max)));
+
+                 assert(fesetround(FE_DOWNWARD) == 0);
+                 res = cuda::std::scalbln(-max, long_min);
+                 assert(eq(T(res), -T(dmin)));
+                 res = cuda::std::scalbln(dmin, long_max);
+                 assert(eq(T(res), T(max)));
+                 res = cuda::std::scalbln(-dmin, int_max + 1);
+                 assert(eq(T(res), -T(inf)));
+
+                 assert(fesetround(FE_TOWARDZERO) == 0);
+                 res = cuda::std::scalbln(dmin, long_max);
+                 assert(eq(T(res), T(max)));
+                 res = cuda::std::scalbln(-max, long_min);
+                 assert(eq(T(res), T(0.0)) && cuda::std::signbit(T(res)));
+
+                 assert(fesetround(FE_TONEAREST) == 0);
+                 feclearexcept(FE_ALL_EXCEPT);
+               }))
+}
+#  endif // _CCCL_HOSTED()
+
+// Only ldexp and scalbln support __float128 so far, so the generic driver can not be used
 TEST_HOST_DEVICE_FUNC void test_float128(const float val)
 {
   test_ldexp<__float128>(val);
+  test_scalbln<__float128>(val);
   test_float128_ldexp_edge_cases(val);
+  test_float128_scalbln_edge_cases(val);
 #  if _CCCL_HOSTED()
   test_float128_ldexp_fenv(val);
+  test_float128_scalbln_fenv(val);
 #  endif // _CCCL_HOSTED()
 }
 #endif // _CCCL_HAS_FLOAT128()
